@@ -2,10 +2,10 @@
 Main file to run
 '''
 import argparse
-from phase1_data_prep import run_phase_1
-from phase2_benchmarking import run_phase_2
-from phase3_scaling_transfer import run_phase_3
-from phase4_synthetic_alignment import run_phase_4
+from Set_up import run_phase_1
+from Benchmarking import run_phase_2
+from Permutation_scaling import run_phase_3
+from empirical_task import run_phase_4
 
 def main():
     parser = argparse.ArgumentParser(description="Graph Matching Benchmark Pipeline")
