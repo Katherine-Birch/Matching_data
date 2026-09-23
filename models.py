@@ -35,21 +35,21 @@ class MLPGumbelSinkhorn(torch.nn.Module):
         )
         
 
-        def forward(self, adj, hard=False):
-            logits = self.net(adj.flatten(1)).view(
-                -1, self.num_nodes, self.num_nodes
-            )
-            if self.training and self.gumbel_noise:
-                logits = logits + sample_gumbel(logits.shape, logits.device)
-            soft = sinkhorn(logits / self.tau, self.n_iters)
-            if not hard:
-                return soft
-            hard_perm = hard_assignment(soft)
-            hard_matrix = F.one_hot(
-                hard_perm, num_classes=self.num_nodes
-            ).to(soft.dtype)
-            # Straight-through estimator
-            return hard_matrix + soft - soft.detach()
+    def forward(self, adj, hard=False):
+        logits = self.net(adj.flatten(1)).view(
+            -1, self.num_nodes, self.num_nodes
+        )
+        if self.training and self.gumbel_noise:
+            logits = logits + sample_gumbel(logits.shape, logits.device)
+        soft = sinkhorn(logits / self.tau, self.n_iters)
+        if not hard:
+            return soft
+        hard_perm = hard_assignment(soft)
+        hard_matrix = F.one_hot(
+            hard_perm, num_classes=self.num_nodes
+        ).to(soft.dtype)
+        # Straight-through estimator
+        return hard_matrix + soft - soft.detach()
 
 
 
@@ -73,7 +73,7 @@ class GINEncoder(nn.Module):
 
 
 
-def dense_to_pyg(adj_matrix, node_features):
+def dense_to_pyg(adj_matrix, node_features, tol=1e-5):
     if adj_matrix.ndim != 2 or adj_matrix.shape[0] != adj_matrix.shape[1]:
         raise ValueError("adj must have shape [N, N]")
     if node_features.ndim != 2 or node_features.shape[0] != adj_matrix.shape[0]:
@@ -132,7 +132,11 @@ def structural_features(adj):
     mean_w = adj.mean(dim=-1, keepdim=True)
     std_w = adj.std(dim=-1, keepdim=True)
  
-    _, eigvecs = torch.linalg.eigh(adj)
+    # CRITICAL FIX: Explicitly move to CPU for the eigh calculation to avoid the MPS threadgroup crash, 
+    # then push the result back to the original device.
+    _, eigvecs = torch.linalg.eigh(adj.cpu())
+    eigvecs = eigvecs.to(adj.device)
+    
     centrality = eigvecs[:, -1].abs().unsqueeze(-1)
     feats = torch.cat([strength, degree, mean_w, std_w, centrality], dim=-1)
     return (feats - feats.mean(0, keepdim=True)) / (feats.std(0, keepdim=True) + 1e-6)

@@ -1,0 +1,2 @@
+epochs,model_kind,test_accuracy,test_forward_time,test_frobenius,test_hungarian_time,test_l1,test_total_time,training_time_seconds,validation_accuracy,validation_forward_time,validation_frobenius,validation_hungarian_time,validation_l1,validation_total_time
+20,gin,1.0,0.015459245720651382,0.0,0.001261333568963425,0.0,0.016720579289614807,1573.5758290830126,1.0,0.014870986102286201,0.0,0.0012320283873123116,0.0,0.016103014489598513

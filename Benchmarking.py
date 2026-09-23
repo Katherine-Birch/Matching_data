@@ -4,7 +4,7 @@ import torch
 from scipy.optimize import quadratic_assignment
 
 from models import structural_features, hard_assignment
-from utils.metrics import evaluate_reconstruction
+from metrics import evaluate_reconstruction
 
 
 '''

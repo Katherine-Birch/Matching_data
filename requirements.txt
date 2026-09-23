@@ -2,3 +2,5 @@ torch
 numpy
 scipy
 torch-geometric
+matplotlib
+seaborn

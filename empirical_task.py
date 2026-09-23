@@ -7,7 +7,7 @@ from scipy.optimize import quadratic_assignment
 
 import config
 from models import structural_features, hard_assignment
-from utils.metrics import evaluate_reconstruction
+from metrics import evaluate_reconstruction
 
 '''
 4) synthetic data matching to biological data
@@ -211,6 +211,13 @@ def save_alignment_results(rows, output_path):
         writer.writerows(rows)
 
 
+def save_alignment_mappings(records, mapping_path):
+    mapping_path = Path(mapping_path)
+    mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(records, mapping_path)
+
+
+
 def run_phase_4(
     model=None,
     synthetic_graphs=None,
@@ -218,6 +225,7 @@ def run_phase_4(
     model_kind="mlp",
     empirical_template=None,
     output_path="results/synthetic_alignment.csv",
+    mapping_path=None,
     device=None,
     n_nulls=1000,
     top_k=10,
@@ -239,7 +247,14 @@ def run_phase_4(
     else:
         empirical_template = torch.as_tensor(empirical_template).float()
 
+    output_path = Path(output_path)
+    if mapping_path is None:
+        mapping_path = output_path.with_name(
+            output_path.stem + "_mappings.pt"
+        )
+
     rows = []
+    mapping_records = []
     for graph_id, A_synth in enumerate(synthetic_graphs):
         result = evaluate_approx_alignment(
             model=model,
@@ -263,8 +278,16 @@ def run_phase_4(
             "hub_overlap_null_mean": result["hub_overlap_null_mean"],
             "hub_overlap_p_value": result["hub_overlap_p_value"],
         })
+        mapping_records.append({
+            "graph_id": graph_id,
+            "model": model_kind,
+            "mapping": result["mapping"].cpu(),
+        })
 
     save_alignment_results(rows, output_path)
+    save_alignment_mappings(mapping_records, mapping_path)
+    print(f"Saved alignment metrics to {output_path}")
+    print(f"Saved alignment mappings to {mapping_path}")
     return rows
 
 

@@ -22,19 +22,33 @@ def load_connectomes(path=None):
     graphs = torch.as_tensor(np.load(path, allow_pickle=True)).float()
     return validate_connectomes(graphs)
 
+
 def load_synthetic_connectomes(path=None):
     path = Path(path or config.SYNTHETIC_DATA_PATH)
+    
+    # 1. Handle NumPy files directly and return immediately
     if path.suffix == '.npy':
         graphs = torch.as_tensor(np.load(path, allow_pickle=True)).float()
+        return validate_connectomes(graphs)
+        
+    # 2. Handle Pickle files
     elif path.suffix == '.pkl':
-        graphs = torch.load(path)
-    with path.open('rb') as f:
-        data = pickle.load(f)
+        with path.open('rb') as f:
+            data = pickle.load(f)
+            
+    # 3. Handle PyTorch files
+    elif path.suffix in ['.pt', '.pth']:
+        data = torch.load(path, weights_only=False)
+        
+    else:
+        raise ValueError(f"Unsupported file format: {path.suffix}")
 
-    records  = list(data.values()) if isinstance(data, dict) else data
-    matrices =[]
+    # 4. Parse complex dictionary structures for .pkl / .pt
+    records = list(data.values()) if isinstance(data, dict) else data
+    matrices = []
+    
     for i, record in enumerate(records):
-        if isinstance(record, torch.Tensor) or isinstance(record, np.ndarray):
+        if isinstance(record, (torch.Tensor, np.ndarray)):
             matrix = record
         elif isinstance(record, dict):
             matrix = record.get("adjacency_matrix", record.get("W"))
@@ -54,7 +68,8 @@ def load_synthetic_connectomes(path=None):
         if matrix is None:
             raise ValueError(f"Could not find adjacency matrix in record {i}")
         matrices.append(torch.as_tensor(matrix).float())
-    return validate_connectomes(torch.stack(matrices))   
+        
+    return validate_connectomes(torch.stack(matrices))
 
 
 def validate_connectomes(tensor):
@@ -141,7 +156,7 @@ def run_phase_1(real_path=None, synthetic_path=None, output_path=None, manifest_
     '''
     wrapper for saving preprocessed_data.pt
     '''
-    real_graphs = load_real_graphs(real_path)
+    real_graphs = load_connectomes(real_path)
     real_indices = torch.arange(len(real_graphs))
     real_graphs, norm_config = normalize_connectomes(
         real_graphs, real_indices
@@ -149,7 +164,7 @@ def run_phase_1(real_path=None, synthetic_path=None, output_path=None, manifest_
 
     synthetic_graphs = None
     if synthetic_path or config.SYNTHETIC_DATA_PATH not in {None, "", ".pkl"}:
-        synthetic_graphs = load_synthetic_graphs(synthetic_path)
+        synthetic_graphs = load_synthetic_connectomes(synthetic_path)
         synthetic_graphs = synthetic_graphs / norm_config["train_max"]
 
     for split_name, seeds in (
@@ -164,7 +179,7 @@ def run_phase_1(real_path=None, synthetic_path=None, output_path=None, manifest_
             output_path=Path(manifest_dir) / f"manifest_{split_name}.pt",
         )
 
-    payload = {
+    experiments = {
         "real_graphs": real_graphs,
         "synthetic_graphs": synthetic_graphs,
         "normalization": norm_config,
@@ -175,8 +190,8 @@ def run_phase_1(real_path=None, synthetic_path=None, output_path=None, manifest_
     }
     output_path = Path(output_path or config.PREPROCESSED_DATA_PATH)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(payload, output_path)
-    return payload
+    torch.save(experiments, output_path)
+    return 
 
 
 if __name__ == "__main__":

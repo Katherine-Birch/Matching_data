@@ -3,11 +3,12 @@ from pathlib import Path
 import csv
 import time
 import numpy as np
+import torch.nn.functional as F
 import torch
 
 import config
 from models import structural_features, hard_assignment
-from utils.metrics import evaluate_reconstruction
+from metrics import evaluate_reconstruction
 
 
 
@@ -33,41 +34,143 @@ def sync_dev(device=None):
         torch.cuda.synchronize()
 
 
-def predict_scores(model, A_true, A_perm, model_kind="mlp", device=None):
+# def predict_scores(model, A_true, A_perm, model_kind="mlp", device=None):
+#     device = device or config.DEVICE
+#     model = model.to(device).eval()
+#     A_true_d, A_perm_d = A_true.to(device), A_perm.to(device)
+
+#     with torch.no_grad():
+#         if model_kind == "mlp":
+#             scores = model(A_perm_d.unsqueeze(0))
+#         elif model_kind in {"gin", "gat", "gnn"}:
+#             f_true = structural_features(A_true_d)
+#             f_perm = structural_features(A_perm_d)
+#             scores = model(A_true_d, A_perm_d, f_true, f_perm)
+#         else:
+#             raise ValueError("model_kind must be 'mlp', 'gin', 'gat', or 'gnn'")
+#     return scores
+
+
+def predict_scores(
+    model,
+    A_true,
+    A_perm,
+    model_kind="mlp",
+    device=None,
+):
     device = device or config.DEVICE
     model = model.to(device).eval()
-    A_true_d, A_perm_d = A_true.to(device), A_perm.to(device)
+    A_true = A_true.to(device)
+    A_perm = A_perm.to(device)
 
     with torch.no_grad():
         if model_kind == "mlp":
-            scores = model(A_perm_d.unsqueeze(0))
-        elif model_kind in {"gin", "gat", "gnn"}:
-            f_true = structural_features(A_true_d)
-            f_perm = structural_features(A_perm_d)
-            scores = model(A_true_d, A_perm_d, f_true, f_perm)
-        else:
-            raise ValueError("model_kind must be 'mlp', 'gin', 'gat', or 'gnn'")
-    return scores
+            return model(A_perm.unsqueeze(0))
+
+        if model_kind in {"gin", "gat", "gnn"}:
+            features_true = structural_features(A_true)
+            features_perm = structural_features(A_perm)
+
+            return model(
+                A_true,
+                A_perm,
+                features_true,
+                features_perm,
+            )
+
+    raise ValueError(
+        "model_kind must be 'mlp', 'gin', 'gat', or 'gnn'"
+    )
 
 
+def evaluate_with_timing(
+    model,
+    A_true,
+    A_perm,
+    expected=None,
+    model_kind="mlp",
+    device=None,
+):
+    device = device or config.DEVICE
+    model = model.to(device).eval()
 
-def evaluate_with_timing(model, A_true, A_perm, expected=None, model_kind="mlp", device=None):
-    A_perm = A_perm.to(config.DEVICE)
-    timing = {}
+    A_true_cpu = A_true.float().cpu()
+    A_perm_cpu = A_perm.float().cpu()
+    A_true_dev = A_true_cpu.to(device)
+    A_perm_dev = A_perm_cpu.to(device)
 
-    sync_dev()
-    t0 = time.perf_counter()
+    sync_dev(device)
+    start = time.perf_counter()
+
     with torch.no_grad():
-        soft_assignment = model(A_perm.unsqueeze(0)).squeeze(0)
-    sync_dev()
-    timing['forward_time'] = time.perf_counter() - t0
+        if model_kind == "mlp":
+            scores = model(A_perm_dev.unsqueeze(0))
 
-    t1 = time.perf_counter()
-    pred_mapping = solve_hungarian_assignment(soft_assignment.unsqueeze(0))[0]
-    timing['hungarian time'] = time.perf_counter() - t1
-    timing['total time'] = timing['forward_time'] + timing['hungarian time']
+        elif model_kind in {"gin", "gat", "gnn"}:
+            features_true = structural_features(A_true_dev)
+            features_perm = structural_features(A_perm_dev)
 
-    return pred_mapping, timing
+            scores = model(
+                A_true_dev,
+                A_perm_dev,
+                features_true,
+                features_perm,
+            )
+
+        else:
+            raise ValueError(
+                f"Unknown model_kind: {model_kind}"
+            )
+
+    sync_dev(device)
+    forward_time = time.perf_counter() - start
+
+    start = time.perf_counter()
+    pred_mapping = hard_assignment(scores)[0].cpu()
+    hungarian_time = time.perf_counter() - start
+
+    metrics = evaluate_reconstruction(
+        A_true_cpu,
+        A_perm_cpu,
+        pred_mapping,
+    )
+
+    row = {
+        "l1": metrics["l1"],
+        "frobenius": metrics.get("frobenius"),
+        "forward_time": forward_time,
+        "hungarian_time": hungarian_time,
+        "total_time": forward_time + hungarian_time,
+    }
+
+    if expected is not None:
+        expected = torch.as_tensor(expected).long().cpu()
+        row["accuracy"] = (
+            pred_mapping == expected
+        ).float().mean().item()
+
+    return pred_mapping, row
+
+# def evaluate_with_timing(model, A_true, A_perm, expected=None, model_kind="mlp", device=None):
+#     device = device or config.DEVICE
+#     model = model.to(device).eval()
+#     A_perm = A_perm.to(device)
+#     timing = {}
+
+#     sync_dev(device)
+#     t0 = time.perf_counter()
+#     with torch.no_grad():
+#         soft_assignment = model(A_perm.unsqueeze(0)).squeeze(0)
+#     sync_dev(device)
+#     timing['forward_time'] = time.perf_counter() - t0
+
+#     t1 = time.perf_counter()
+#     # pred_mapping = hard_assignment(soft_assignment.unsqueeze(0))[0]
+#     pred_mapping = hard_assignment(soft_assignment.unsqueeze(0))[0].cpu()
+#     timing['hungarian time'] = time.perf_counter() - t1
+#     timing['total time'] = timing['forward_time'] + timing['hungarian time']
+
+#     return pred_mapping, timing
 
 def load_manifest(manifest_path):
     records = torch.load(Path(manifest_path), weights_only=False)
@@ -90,10 +193,16 @@ def evaluate_manifest(model, graphs, manifest_path, model_kind="mlp", device=Non
     rows = []
     for record in records:
         A_true, A_perm, expected = pair_from_record(graphs, record)
-        _, metrics = evaluate_with_timing(
+        pred_mapping, metrics = evaluate_with_timing(
             model, A_true, A_perm, expected,
             model_kind=model_kind, device=device,
         )
+        
+        recon_metrics = evaluate_reconstruction(A_true, A_perm, pred_mapping)
+        metrics["accuracy"] = (pred_mapping.cpu() == expected.cpu()).float().mean().item()
+        metrics["l1"] = recon_metrics["l1"]
+        metrics["frobenius"] = recon_metrics.get("frobenius")
+
         rows.append({
             "split": label,
             "graph_id": int(record["graph_id"]),

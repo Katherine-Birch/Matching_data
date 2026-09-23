@@ -1,0 +1,5 @@
+mean_accuracy,mean_forward_time,mean_frobenius,mean_hungarian_time,mean_l1,mean_total_time,model_kind,n_pairs,split
+nan,0.005104392471356942,nan,nan,nan,nan,mlp,5200,baseline_seen
+nan,0.004668492338041687,nan,nan,nan,nan,mlp,5200,baseline_finetune_set
+nan,0.004127634394497783,nan,nan,nan,nan,mlp,5200,baseline_unseen
+nan,0.0040491428184185885,nan,nan,nan,nan,mlp,5200,finetuned_unseen
